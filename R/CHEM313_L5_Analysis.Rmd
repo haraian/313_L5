@@ -8,3 +8,177 @@ library(dplyr)
 library(readr)
 library(outliers)
 ```
+
+data
+```{r}
+levo_cal <- read.csv("~/CHEM313_L5_Levoglucosan/data/tidycal.csv")
+levo_sample <- read.csv("~/CHEM313_L5_Levoglucosan/data/tidysample.csv")
+```
+
+calibration curve
+```{r}
+  
+model <- lm(levo_cal$peak_area ~ levo_cal$conc)
+slope <- model$coefficients[2]
+intercept <- model$coefficients[1]
+slope_std <- summary(model)$coefficients[2,2]
+intercept_std <- summary(model)$coefficients[1,2]
+  
+plot(levo_cal$peak_area ~ levo_cal$conc,
+     xlab = "Concentration of levoglucosan (ug/mL)",
+     ylab = "max peak area") +
+  abline(model, col="blue") +
+  title("Calibration Curve for Levoglucosan")
+
+levo_caltb <- tibble(slope, slope_std, intercept, intercept_std)
+levo_caltb
+#clean up
+rm(slope, slope_std, intercept, intercept_std, model)
+
+```
+
+```{r}
+m <- levo_caltb$slope
+b <- levo_caltb$intercept
+y <- levo_sample$peak_area
+b_e <- levo_caltb$intercept_std
+m_e <- levo_caltb$slope_std
+x <- (y-b)/m
+#error propagation
+yb <- y-b
+e_yb <- sqrt((b_e)^2) #error in y-b in calibration
+e_x <- x*sqrt((e_yb/yb)^2+(m_e/m)^2) #error in x from calibration
+
+levo_conc_data <- tibble(year = levo_sample$year, location = levo_sample$location, conc = x, conc_error = e_x)
+
+levo_conc_data
+levo_sample
+```
+
+average per year and location
+```{r}
+levo_all <- cbind(levo_conc_data, peak_area = levo_sample$peak_area)
+levo_all
+
+levo_conc_m3 <- levo_all %>% mutate(conc_ugm3 = conc*2*70/24) %>% mutate(conc_error_ugm3 = conc_error*2*70/24)
+levo_conc_m3
+write.csv(levo_conc_m3, file = "concdata.csv", row.names = FALSE)
+
+levo_avg <- levo_conc_m3 %>% group_by(location) %>% 
+  group_by(year, add = TRUE) %>%
+  summarize(conc_mean = mean(conc_ugm3), conc_sd = sd(conc_ugm3))
+
+levo_avg
+write.csv(levo_avg, "levomeans.csv", row.names = FALSE)
+
+library(ggplot2)
+
+gg <- ggplot(levo_avg, aes(x = year, y = conc_mean, fill = location)) +
+  geom_col(position = "dodge") +
+  labs(x="year", y="concentration (ug/m^3)", color = "location") +
+  geom_errorbar(aes(ymin = conc_mean - conc_sd, 
+                    ymax = conc_mean + conc_sd), width=8, 
+                position = position_dodge(63)) + theme_bw()
+
+print(gg)
+```
+
+variance
+```{r}
+
+run_ftest <- function(unique_year) {
+  sample <- filter(levo_conc_m3, year == unique_year, location == "east")
+  sample2 <- filter(levo_conc_m3, year == unique_year, location == "west")
+    data <- NULL
+    v1 <- sample$conc_ugm3
+    v2 <- sample2$conc_ugm3
+    f <- var.test(v2, v1)
+    data <- f
+  return(data)
+}
+
+run_ftest(1750)
+run_ftest(1950)
+run_ftest(2020)
+
+ttestpaired <- function(unique_year) {
+  sample <- filter(levo_conc_m3, year == unique_year, location == "east")
+  sample2 <- filter(levo_conc_m3, year == unique_year, location == "west")
+    data <- NULL
+    v1 <- sample$conc_ugm3
+    v2 <- sample2$conc_ugm3
+    t <- t.test(v1, v2, mu=0, paired=TRUE, var.equal=TRUE)
+    data <- t
+  return(data)
+}
+
+ttestunpaired <- function(unique_year) {
+  sample <- filter(levo_conc_m3, year == unique_year, location == "east")
+  sample2 <- filter(levo_conc_m3, year == unique_year, location == "west")
+    data <- NULL
+    v1 <- sample$conc_ugm3
+    v2 <- sample2$conc_ugm3
+    t <- t.test(v1, v2, mu=0, paired=FALSE, var.equal=FALSE)
+    data <- t
+  return(data)
+}
+
+ttestpaired(1950)
+ttestunpaired(1750)
+ttestunpaired(2020)
+
+
+run_ftest2 <- function(unique_location) {
+  sample <- filter(levo_conc_m3, year == 1950, location == unique_location)
+  sample2 <- filter(levo_conc_m3, year == 2020, location == unique_location)
+    data <- NULL
+    v1 <- sample$conc_ugm3
+    v2 <- sample2$conc_ugm3
+    f <- var.test(v1, v2)
+    data <- f
+  return(data)
+}
+
+run_ftest3 <- function(unique_location) {
+  sample <- filter(levo_conc_m3, year == 1950, location == unique_location)
+  sample2 <- filter(levo_conc_m3, year == 2020, location == unique_location)
+    data <- NULL
+    v1 <- sample$conc_ugm3
+    v2 <- sample2$conc_ugm3
+    f <- var.test(v2, v1)
+    data <- f
+  return(data)
+}
+
+run_ftest3("west")
+run_ftest2("east")
+
+ttestpaired2 <- function(unique_location) {
+  sample <- filter(levo_conc_m3, year == 1950, location == unique_location)
+  sample2 <- filter(levo_conc_m3, year == 2020, location == unique_location)
+    data <- NULL
+    v1 <- sample$conc_ugm3
+    v2 <- sample2$conc_ugm3
+    t <- t.test(v1, v2, mu=0, paired=TRUE, var.equal=TRUE)
+    data <- t
+  return(data)
+}
+
+ttestunpaired2 <- function(unique_location) {
+  sample <- filter(levo_conc_m3, year == 1950, location == unique_location)
+  sample2 <- filter(levo_conc_m3, year == 2020, location == unique_location)
+    data <- NULL
+    v1 <- sample$conc_ugm3
+    v2 <- sample2$conc_ugm3
+    t <- t.test(v1, v2, mu=0, paired=FALSE, var.equal=FALSE)
+    data <- t
+  return(data)
+}
+
+ttestunpaired2("west")
+ttestpaired2("east")
+
+```
+
+
+
